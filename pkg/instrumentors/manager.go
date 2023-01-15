@@ -6,6 +6,7 @@ import (
 	gorillaMux "github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/bpf/github.com/gorilla/mux"
 	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/bpf/google/golang/org/grpc"
 	grpcServer "github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/bpf/google/golang/org/grpc/server"
+	goroutineTracker "github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/bpf/goroutine_tracker"
 	httpServer "github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/bpf/net/http/server"
 	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/instrumentors/events"
 	"github.com/keyval-dev/opentelemetry-go-instrumentation/pkg/log"
@@ -86,6 +87,7 @@ func registerInstrumentors(m *instrumentorsManager) error {
 		grpcServer.New(),
 		httpServer.New(),
 		gorillaMux.New(),
+		goroutineTracker.New(),
 	}
 
 	for _, i := range insts {

@@ -1,5 +1,4 @@
 #include "arguments.h"
-#include "span_context.h"
 #include "go_context.h"
 
 char __license[] SEC("license") = "Dual MIT/GPL";
@@ -16,11 +15,11 @@ struct http_request_t {
 };
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
-	__type(key, void*);
-	__type(value, struct http_request_t);
-	__uint(max_entries, MAX_CONCURRENT);
-} context_to_http_events SEC(".maps");
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __type(key, s64);
+    __type(value, struct http_request_t);
+    __uint(max_entries, MAX_CONCURRENT);
+} goroutine_id_to_http_req SEC(".maps");
 
 struct {
 	__uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
@@ -36,6 +35,13 @@ volatile const u64 ctx_ptr_pos;
 // func (mux *ServeMux) ServeHTTP(w ResponseWriter, r *Request)
 SEC("uprobe/ServerMux_ServeHTTP")
 int uprobe_ServerMux_ServeHTTP(struct pt_regs *ctx) {
+    s64 go_id = get_goroutine_id();
+
+    if (go_id == 0) {
+        bpf_printk("uprobe_ServerMux_ServeHTTP: goroutine id is 0, returning");
+        return 0;
+    }
+
     u64 request_pos = 4;
     struct http_request_t httpReq = {};
     httpReq.start_time = bpf_ktime_get_boot_ns();
@@ -69,24 +75,31 @@ int uprobe_ServerMux_ServeHTTP(struct pt_regs *ctx) {
 
     // Write event
     httpReq.sc = generate_span_context();
-    bpf_map_update_elem(&context_to_http_events, &ctx_iface, &httpReq, 0);
+    bpf_map_update_elem(&goroutine_id_to_http_req, &go_id, &httpReq, 0);
     long res = bpf_map_update_elem(&spans_in_progress, &ctx_iface, &httpReq.sc, 0);
     return 0;
 }
 
 SEC("uprobe/ServerMux_ServeHTTP")
 int uprobe_ServerMux_ServeHTTP_Returns(struct pt_regs *ctx) {
+    s64 go_id = get_goroutine_id();
+
+    if (go_id == 0) {
+        bpf_printk("uprobe_ServerMux_ServeHTTP_Returns: goroutine id is 0, returning");
+        return 0;
+    }
+
     u64 request_pos = 4;
     void* req_ptr = get_argument_by_stack(ctx, request_pos);
     void *ctx_iface = 0;
     bpf_probe_read(&ctx_iface, sizeof(ctx_iface), (void *)(req_ptr+ctx_ptr_pos+8));
 
-    void* httpReq_ptr = bpf_map_lookup_elem(&context_to_http_events, &ctx_iface);
+    void* httpReq_ptr = bpf_map_lookup_elem(&goroutine_id_to_http_req, &go_id);
     struct http_request_t httpReq = {};
     bpf_probe_read(&httpReq, sizeof(httpReq), httpReq_ptr);
     httpReq.end_time = bpf_ktime_get_boot_ns();
     bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &httpReq, sizeof(httpReq));
-    bpf_map_delete_elem(&context_to_http_events, &ctx_iface);
+    bpf_map_delete_elem(&goroutine_id_to_http_req, &go_id);
     bpf_map_delete_elem(&spans_in_progress, &ctx_iface);
     return 0;
 }

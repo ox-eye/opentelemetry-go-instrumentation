@@ -1,5 +1,4 @@
 #include "arguments.h"
-#include "span_context.h"
 #include "go_context.h"
 
 char __license[] SEC("license") = "Dual MIT/GPL";
